@@ -1,11 +1,27 @@
+import os
 import sqlite3
 from datetime import datetime, timezone
 
 
-DB_PATH = "/data/radar.db"
+def _resolve_db_path():
+    override = os.environ.get("RADAR_DB_PATH")
+    if override:
+        return override
+
+    if os.path.isdir("/data") and os.access("/data", os.W_OK):
+        return "/data/radar.db"
+
+    return "/tmp/radar.db"
+
+
+DB_PATH = _resolve_db_path()
 
 
 def init_db():
+    directory = os.path.dirname(DB_PATH)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS repositories (
