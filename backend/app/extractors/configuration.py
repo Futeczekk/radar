@@ -19,8 +19,40 @@ def _make_evidence(file_path: str, line_number: int | None, snippet: str | None,
     }
 
 
-def _make_fact(fact_type: str, subject: str, value: Any, confidence: float, extractor: str, evidence: list[dict]):
-    return {
+def _scope_for_file(file_path: str):
+    normalized = file_path.replace("\\", "/").lower()
+    segments = [segment for segment in normalized.split("/") if segment]
+
+    if ".github/workflows/" in normalized:
+        return "ci"
+    if any(segment in {"examples", "example", "demo", "samples", "docs", "documentation"} for segment in segments):
+        return "example"
+    if any(segment in {"tests", "test", "fixtures", "testdata"} for segment in segments):
+        return "test"
+    if any(segment in {"vendor", "third_party", "external", "deps"} for segment in segments):
+        return "vendor"
+    if any(segment in {"build", "dist", "generated", "out", "target"} for segment in segments):
+        return "generated"
+    if len(segments) > 1 and segments[0] not in {".github", "src", "docs"}:
+        return "subproject"
+    return "project"
+
+
+def _source_type_for_file(file_path: str):
+    normalized = file_path.replace("\\", "/").lower()
+    if ".github/workflows/" in normalized:
+        return "ci_config"
+    if normalized.endswith("pyproject.toml") or normalized.endswith("package.json"):
+        return "manifest"
+    if normalized.endswith("cmakelists.txt"):
+        return "build_config"
+    if normalized.endswith("dockerfile"):
+        return "build_config"
+    return "unknown"
+
+
+def _make_fact(fact_type: str, subject: str, value: Any, confidence: float, extractor: str, evidence: list[dict], *, scope: str | None = None, source_type: str | None = None, environment: str | None = None):
+    fact = {
         "type": fact_type,
         "subject": subject,
         "value": value,
@@ -28,6 +60,13 @@ def _make_fact(fact_type: str, subject: str, value: Any, confidence: float, extr
         "extractor": extractor,
         "evidence": evidence,
     }
+    if scope is not None:
+        fact["scope"] = scope
+    if source_type is not None:
+        fact["source_type"] = source_type
+    if environment is not None:
+        fact["environment"] = environment
+    return fact
 
 
 def _deduplicate_facts(facts):
@@ -91,6 +130,8 @@ def _compares_as_mismatch(requirement_value: str, observed_value: str):
 def _parse_cmake(file_path: str, content: str):
     facts = []
     lines = content.splitlines()
+    scope = _scope_for_file(file_path)
+    source_type = _source_type_for_file(file_path)
 
     match = re.search(r"cmake_minimum_required\s*\(\s*VERSION\s+([^\)]+)\)", content, flags=re.IGNORECASE)
     if match:
@@ -108,6 +149,9 @@ def _parse_cmake(file_path: str, content: str):
                 1.0,
                 "cmake",
                 [_make_evidence(file_path, line_number, line_number and lines[line_number - 1].strip(), "CMake minimum version declared in CMakeLists.txt")],
+                scope=scope,
+                source_type=source_type,
+                environment="build",
             )
         )
 
@@ -127,6 +171,9 @@ def _parse_cmake(file_path: str, content: str):
                 1.0,
                 "cmake",
                 [_make_evidence(file_path, line_number, line_number and lines[line_number - 1].strip(), "Project name declared in CMakeLists.txt")],
+                scope=scope,
+                source_type=source_type,
+                environment="build",
             )
         )
 
@@ -137,6 +184,8 @@ def _parse_docker(file_path: str, content: str):
     facts = []
     images = []
     evidence = []
+    scope = _scope_for_file(file_path)
+    source_type = _source_type_for_file(file_path)
     for idx, line in enumerate(content.splitlines(), start=1):
         match = re.match(r"^\s*FROM\s+(?:--platform=\S+\s+)?([^\s]+)(?:\s+AS\s+\S+)?", line, flags=re.IGNORECASE)
         if not match:
@@ -158,6 +207,9 @@ def _parse_docker(file_path: str, content: str):
                 1.0,
                 "dockerfile",
                 evidence,
+                scope=scope,
+                source_type=source_type,
+                environment="build",
             )
         )
     return facts
@@ -178,6 +230,8 @@ def _parse_pyproject(file_path: str, content: str):
     if not text:
         return []
 
+    scope = _scope_for_file(file_path)
+    source_type = _source_type_for_file(file_path)
     return [
         _make_fact(
             "python.required_version",
@@ -186,6 +240,9 @@ def _parse_pyproject(file_path: str, content: str):
             1.0,
             "pyproject",
             [_make_evidence(file_path, None, None, "Python requirement declared in pyproject.toml")],
+            scope=scope,
+            source_type=source_type,
+            environment="runtime",
         )
     ]
 
@@ -204,6 +261,8 @@ def _parse_package_json(file_path: str, content: str):
     if not text:
         return []
 
+    scope = _scope_for_file(file_path)
+    source_type = _source_type_for_file(file_path)
     return [
         _make_fact(
             "node.required_version",
@@ -212,6 +271,9 @@ def _parse_package_json(file_path: str, content: str):
             1.0,
             "package_json",
             [_make_evidence(file_path, None, None, "Node.js requirement declared in package.json")],
+            scope=scope,
+            source_type=source_type,
+            environment="runtime",
         )
     ]
 
@@ -239,6 +301,19 @@ def _parse_github_actions(file_path: str, content: str):
 
     facts = []
     seen = set()
+    matrix_versions = {}
+
+    if isinstance(parsed, dict):
+        strategy = parsed.get("jobs", {})
+        if isinstance(strategy, dict):
+            for job in strategy.values():
+                if not isinstance(job, dict):
+                    continue
+                matrix = job.get("strategy", {}).get("matrix", {}) if isinstance(job.get("strategy", {}), dict) else {}
+                if isinstance(matrix, dict):
+                    for key, values in matrix.items():
+                        if isinstance(values, list):
+                            matrix_versions[key] = values
 
     for step in _iter_workflow_steps(parsed):
         uses = step.get("uses") or ""
@@ -253,17 +328,30 @@ def _parse_github_actions(file_path: str, content: str):
             version = _version_value(python_version)
             if not version:
                 continue
-            key = ("ci.python_version", version)
+            if python_version == "${{ matrix.python-version }}" and "python-version" in matrix_versions:
+                fact_value = matrix_versions["python-version"]
+                source_type = "test_matrix"
+                environment = "test"
+            else:
+                fact_value = version
+                source_type = "ci_config"
+                environment = "runtime"
+
+            key_value = tuple(fact_value) if isinstance(fact_value, list) else fact_value
+            key = ("ci.python_version", key_value)
             if key not in seen:
                 seen.add(key)
                 facts.append(
                     _make_fact(
                         "ci.python_version",
                         "Python",
-                        version,
+                        fact_value,
                         1.0,
                         "github_actions",
                         [_make_evidence(file_path, None, None, "Python runtime version declared in GitHub Actions workflow")],
+                        scope="ci",
+                        source_type=source_type,
+                        environment=environment,
                     )
                 )
 
@@ -274,17 +362,30 @@ def _parse_github_actions(file_path: str, content: str):
             version = _version_value(node_version)
             if not version:
                 continue
-            key = ("ci.node_version", version)
+            if node_version == "${{ matrix.node-version }}" and "node-version" in matrix_versions:
+                fact_value = matrix_versions["node-version"]
+                source_type = "test_matrix"
+                environment = "test"
+            else:
+                fact_value = version
+                source_type = "ci_config"
+                environment = "runtime"
+
+            key_value = tuple(fact_value) if isinstance(fact_value, list) else fact_value
+            key = ("ci.node_version", key_value)
             if key not in seen:
                 seen.add(key)
                 facts.append(
                     _make_fact(
                         "ci.node_version",
                         "Node.js",
-                        version,
+                        fact_value,
                         1.0,
                         "github_actions",
                         [_make_evidence(file_path, None, None, "Node.js runtime version declared in GitHub Actions workflow")],
+                        scope="ci",
+                        source_type=source_type,
+                        environment=environment,
                     )
                 )
 
@@ -305,6 +406,10 @@ def _collect_version_inconsistencies(facts):
     }
 
     for fact in facts:
+        if fact.get("source_type") == "test_matrix":
+            continue
+        if fact.get("scope") in {"example", "test", "vendor", "generated"}:
+            continue
         fact_type = fact["type"]
         value = fact["value"]
         if fact_type == "python.required_version":
@@ -335,7 +440,9 @@ def _collect_version_inconsistencies(facts):
                         "sources": [
                             fact["evidence"][0]["file"]
                             for fact in facts
-                            if fact["type"] in {"python.required_version", "ci.python_version"} and fact["subject"] == technology
+                            if fact["type"] in {"python.required_version", "ci.python_version", "node.required_version", "ci.node_version"}
+                            and fact["subject"] == technology
+                            and fact.get("scope") in {"project", "ci"}
                         ],
                     }
                 )

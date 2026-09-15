@@ -23,3 +23,6 @@ class Fact(BaseModel):
     confidence: float
     extractor: str
     evidence: list[Evidence]
+    scope: str | None = None
+    source_type: str | None = None
+    environment: str | None = None
