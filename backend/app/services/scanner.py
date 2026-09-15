@@ -1,3 +1,5 @@
+import re
+
 from app.core.database import (
     get_previous_release,
     save_repository_state,
@@ -285,6 +287,263 @@ def build_repository_map(paths):
     }
 
 
+def _path_scope(path: str):
+    imported_segments = [segment for segment in _normalize_repo_path(path).split("/") if segment]
+    if "contrib" in imported_segments:
+        return "subproject"
+    if any(segment in WEAK_PATH_SEGMENTS for segment in imported_segments):
+        for segment in imported_segments:
+            if segment in WEAK_PATH_SEGMENTS:
+                return {
+                    "tests": "test",
+                    "test": "test",
+                    "fixtures": "test",
+                    "testdata": "test",
+                    "examples": "example",
+                    "example": "example",
+                    "demo": "example",
+                    "samples": "example",
+                    "docs": "documentation",
+                    "documentation": "documentation",
+                    "vendor": "vendor",
+                    "third_party": "vendor",
+                    "external": "vendor",
+                    "deps": "vendor",
+                    "build": "generated",
+                    "dist": "generated",
+                    "generated": "generated",
+                    "out": "generated",
+                    "target": "generated",
+                }[segment]
+    return "project"
+
+
+def _candidate_python_modules(path: str):
+    normalized = _normalize_repo_path(path)
+    if normalized.endswith("/__init__.py"):
+        return [normalized.rsplit("/", 2)[0].replace("/", ".") if "/" in normalized.rsplit("/", 2)[0] else normalized.rsplit("/", 1)[0].replace("/", ".")]
+    if normalized.endswith(".py"):
+        stem = normalized[:-3]
+        if "/" in stem:
+            return [stem.replace("/", ".")]
+        return [stem]
+    return []
+
+
+def _resolve_python_import(source_path: str, import_name: str, known_files: set[str], imported_name: str | None = None):
+    source_dir = source_path.rsplit("/", 1)[0] if "/" in source_path else ""
+    module_parts = import_name.replace(".", "/")
+
+    if import_name.startswith("."):
+        return None
+
+    candidates = []
+    if imported_name:
+        candidates.append(f"{module_parts}/{imported_name}")
+    if source_dir:
+        if imported_name:
+            candidates.append(f"{source_dir}/{module_parts}/{imported_name}")
+    candidates.append(module_parts)
+    if source_dir:
+        candidates.append(f"{source_dir}/{module_parts}")
+
+    seen_candidates = set()
+    for candidate in candidates:
+        if candidate in seen_candidates:
+            continue
+        seen_candidates.add(candidate)
+        for suffix in (".py", "/__init__.py"):
+            possible = candidate + suffix
+            if possible in known_files:
+                return possible
+            if candidate.endswith("/__init__"):
+                package_candidate = candidate[:-9]
+                if package_candidate + ".py" in known_files:
+                    return package_candidate + ".py"
+
+    return None
+
+
+def _resolve_js_import(source_path: str, import_path: str, known_files: set[str]):
+    if not import_path.startswith("./") and not import_path.startswith("../"):
+        return None
+
+    base_dir = source_path.rsplit("/", 1)[0] if "/" in source_path else ""
+    target = import_path
+    if target.startswith("./"):
+        target = target[2:]
+    elif target.startswith("../"):
+        target = target[3:]
+
+    normalized_base = _normalize_repo_path(base_dir)
+    potential = []
+    if target:
+        for suffix in ("", ".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs"):
+            potential.append(_normalize_repo_path(f"{normalized_base}/{target}{suffix}"))
+            potential.append(_normalize_repo_path(f"{normalized_base}/{target}/index.js"))
+            potential.append(_normalize_repo_path(f"{normalized_base}/{target}/index.ts"))
+            potential.append(_normalize_repo_path(f"{normalized_base}/{target}/index.jsx"))
+            potential.append(_normalize_repo_path(f"{normalized_base}/{target}/index.tsx"))
+    for candidate in potential:
+        if candidate in known_files:
+            return candidate
+    return None
+
+
+def _resolve_cpp_include(source_path: str, include_name: str, known_files: set[str]):
+    if include_name.startswith("<"):
+        return None
+    source_dir = source_path.rsplit("/", 1)[0] if "/" in source_path else ""
+    candidates = []
+    for prefix in [source_dir, ""]:
+        if prefix:
+            candidates.append(_normalize_repo_path(f"{prefix}/{include_name}"))
+        else:
+            candidates.append(_normalize_repo_path(include_name))
+    for candidate in candidates:
+        if candidate in known_files:
+            return candidate
+    return None
+
+
+def _extract_python_relationships(file_contents: dict[str, str]):
+    relationships = []
+    known_files = set(file_contents)
+    for path, content in file_contents.items():
+        scope = _path_scope(path)
+        for line_number, line in enumerate(content.splitlines(), start=1):
+            import_match = re.match(r"^\s*import\s+([A-Za-z0-9_\.]+)", line)
+            if import_match:
+                import_name = import_match.group(1)
+                resolved = _resolve_python_import(path, import_name, known_files)
+                if resolved and resolved != path:
+                    relationships.append({
+                        "source": path,
+                        "target": resolved,
+                        "type": "imports",
+                        "confidence": 1.0,
+                        "scope": scope,
+                        "evidence": [{
+                            "file": path,
+                            "line": line_number,
+                            "snippet": line.strip(),
+                            "reason": f"Python import resolves to {resolved}",
+                        }],
+                    })
+                continue
+
+            from_match = re.match(r"^\s*from\s+([A-Za-z0-9_\.]+)\s+import\s+([A-Za-z0-9_\s,\*]+)", line)
+            if from_match:
+                import_name = from_match.group(1)
+                imported_names = [value.strip() for value in from_match.group(2).split(",") if value.strip() and value.strip() != "*"]
+                if not imported_names:
+                    continue
+                for imported_name in imported_names:
+                    resolved = _resolve_python_import(path, import_name, known_files, imported_name)
+                    if resolved and resolved != path:
+                        relationships.append({
+                            "source": path,
+                            "target": resolved,
+                            "type": "imports",
+                            "confidence": 1.0,
+                            "scope": scope,
+                            "evidence": [{
+                                "file": path,
+                                "line": line_number,
+                                "snippet": line.strip(),
+                                "reason": f"Python import resolves to {resolved}",
+                            }],
+                        })
+    return relationships
+
+
+def _extract_js_relationships(file_contents: dict[str, str]):
+    relationships = []
+    known_files = set(file_contents)
+    for path, content in file_contents.items():
+        scope = _path_scope(path)
+        for line_number, line in enumerate(content.splitlines(), start=1):
+            matches = __import__("re").finditer(r"(?:import\s+(?:[^;]+?\s+from\s+)?|require\s*\()\s*['\"]([^'\"]+)['\"]", line)
+            for match in matches:
+                target_ref = match.group(1)
+                if not target_ref.startswith("./") and not target_ref.startswith("../"):
+                    continue
+                resolved = _resolve_js_import(path, target_ref, known_files)
+                if not resolved or resolved == path:
+                    continue
+                relationships.append({
+                    "source": path,
+                    "target": resolved,
+                    "type": "imports",
+                    "confidence": 1.0,
+                    "scope": scope,
+                    "evidence": [{
+                        "file": path,
+                        "line": line_number,
+                        "snippet": line.strip(),
+                        "reason": f"Relative module import resolves to {resolved}",
+                    }],
+                })
+    return relationships
+
+
+def _extract_cpp_relationships(file_contents: dict[str, str]):
+    relationships = []
+    known_files = set(file_contents)
+    for path, content in file_contents.items():
+        scope = _path_scope(path)
+        for line_number, line in enumerate(content.splitlines(), start=1):
+            match = __import__("re").search(r'#include\s*["<]([^">]+)[">]', line)
+            if not match:
+                continue
+            include_ref = match.group(1)
+            if include_ref.startswith("<"):
+                continue
+            resolved = _resolve_cpp_include(path, include_ref, known_files)
+            if not resolved or resolved == path:
+                continue
+            relationships.append({
+                "source": path,
+                "target": resolved,
+                "type": "includes",
+                "confidence": 1.0,
+                "scope": scope,
+                "evidence": [{
+                    "file": path,
+                    "line": line_number,
+                    "snippet": line.strip(),
+                    "reason": f"Local include resolves to {resolved}",
+                }],
+            })
+    return relationships
+
+
+def build_repository_graph(file_contents):
+    file_contents = file_contents or {}
+    relationships = []
+    if not file_contents:
+        return {"nodes": [], "relationships": []}
+
+    nodes = [{"id": path, "type": "file"} for path in sorted(file_contents)]
+    relationships.extend(_extract_python_relationships(file_contents))
+    relationships.extend(_extract_js_relationships(file_contents))
+    relationships.extend(_extract_cpp_relationships(file_contents))
+
+    deduped = []
+    seen = set()
+    for relationship in relationships:
+        key = (relationship["source"], relationship["target"], relationship["type"])
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(relationship)
+
+    return {
+        "nodes": nodes,
+        "relationships": deduped,
+    }
+
+
 def scan_repository(url: str):
     if not url.startswith(GITHUB_PREFIX):
         raise ValueError(
@@ -328,6 +587,14 @@ def scan_repository(url: str):
     )
 
     repository_map = build_repository_map(files)
+    repository_graph = build_repository_graph({
+        path: content
+        for path, content in get_repository_file_contents(
+            repository,
+            data.get("default_branch", "main"),
+            files[:200]
+        ).items()
+    })
 
     return {
         "repository": data["full_name"],
@@ -340,6 +607,7 @@ def scan_repository(url: str):
         "facts": facts,
         "findings": findings,
         "repository_map": repository_map,
+        "repository_graph": repository_graph,
         "latest_release": latest_release,
         "previous_release": previous_version,
         "new_release_detected": new_release,
