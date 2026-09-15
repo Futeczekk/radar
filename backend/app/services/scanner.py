@@ -2,9 +2,14 @@ from app.core.database import (
     get_previous_release,
     save_repository_state,
 )
+from app.extractors.configuration import extract_configuration
 from app.extractors.technology import extract_technologies
 from app.sources.github import get_repository, get_latest_release
-from app.sources.repository import get_repository_tree
+from app.sources.repository import (
+    get_repository_file_contents,
+    get_repository_tree,
+    select_important_file_paths,
+)
 
 
 GITHUB_PREFIX = "https://github.com/"
@@ -20,7 +25,11 @@ def scan_repository(url: str):
 
     data = get_repository(repository)
     files = get_repository_tree(repository)
-    entities, facts = extract_technologies(files)
+    important_paths = select_important_file_paths(files)
+    important_contents = get_repository_file_contents(repository, data.get("default_branch", "main"), important_paths)
+    entities, tech_facts = extract_technologies(files)
+    config_facts, findings = extract_configuration(important_contents)
+    facts = tech_facts + config_facts
     release_data = get_latest_release(repository)
 
     latest_release = None
@@ -57,6 +66,7 @@ def scan_repository(url: str):
         "files_scanned": len(files),
         "entities": entities,
         "facts": facts,
+        "findings": findings,
         "latest_release": latest_release,
         "previous_release": previous_version,
         "new_release_detected": new_release,
