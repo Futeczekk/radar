@@ -1,0 +1,92 @@
+[
+  {
+    "repository": "Futii10/radar-test",
+    "ref": "d893460cc40474cd605a75ae08c7ca83e722b5e6",
+    "tags": ["controlled", "python", "ci", "dependency-chain"]
+  },
+  {
+    "repository": "expressjs/express",
+    "ref": "9a34acf03cb818ff3f8bc40e44176e277a25cbb9",
+    "tags": ["javascript", "library", "examples", "tests", "unusual-filenames"]
+  },
+  {
+    "repository": "madler/zlib",
+    "ref": "da607da739fa6047df13e66a2af6b8bec7c2a498",
+    "tags": ["c", "subproject", "contrib", "cmake"]
+  },
+  {
+    "repository": "pallets/flask",
+    "ref": "d73fa1cdcbd8b1465c151db8924ba58b1dd14e35",
+    "tags": ["python", "library", "tests"]
+  },
+  {
+    "repository": "psf/requests",
+    "ref": "dae7ef63b4df6eded86637f251fc4e3a06c3b479",
+    "tags": ["python", "library", "ci"]
+  },
+  {
+    "repository": "django/django",
+    "ref": "8cbdd4a814397f81adf0129288f32b615bd1f94f",
+    "tags": ["python", "monorepo-like", "tests", "docs"]
+  },
+  {
+    "repository": "fastapi/fastapi",
+    "ref": "50113da16fec53b66b80d75e80a89296de4fa5a5",
+    "tags": ["python", "api", "ci", "examples"]
+  },
+  {
+    "repository": "microsoft/TypeScript",
+    "ref": "bb209ac1c0a8c1b1b8f74da1968e88be0bf1f2cd",
+    "tags": ["typescript", "javascript", "monorepo-like", "tests"]
+  },
+  {
+    "repository": "nodejs/node",
+    "ref": "ecd365e5fe7d053824396237ca412d1e6d534adc",
+    "tags": ["javascript", "c++", "large", "ci"]
+  },
+  {
+    "repository": "curl/curl",
+    "ref": "3a397f7a05a46521b2772670b92ffda53fe05598",
+    "tags": ["c", "cmake", "autotools", "tests"]
+  },
+  {
+    "repository": "redis/redis",
+    "ref": "07a33b919581e2b0663e34731a490d768e553dfa",
+    "tags": ["c", "cmake", "subprojects", "tests"]
+  },
+  {
+    "repository": "kubernetes/kubernetes",
+    "ref": "87a11ba85cf1216acea329f7f7e1b97362d16c44",
+    "tags": ["go", "large", "monorepo-like", "ci"]
+  },
+  {
+    "repository": "ansible/ansible",
+    "ref": "b84e2cb6adbaee7fb064d137ca2be38cc530e36c",
+    "tags": ["python", "plugins", "modules", "tests"]
+  },
+  {
+    "repository": "apache/arrow",
+    "ref": "6219555bb133ea57d51fd38f56079f555bd7998f",
+    "tags": ["c++", "python", "java", "mixed", "ci"]
+  },
+  {
+    "repository": "denoland/deno",
+    "ref": "685eb3b4b4ffaf2770480b8a99021e8b03292786",
+    "tags": ["rust", "typescript", "javascript", "large"]
+  },
+  {
+    "repository": "tensorflow/tensorflow",
+    "ref": "f1fcf93a8ae91184fe99152f0c00c0435aebbf9b",
+    "tags": ["python", "c++", "cuda", "large", "monorepo-like"]
+  },
+  {
+    "repository": "numpy/numpy",
+    "ref": "bc2613e2fdfaa1375e40b78df7de9ef407720f04",
+    "tags": ["python", "c", "cython", "build"]
+  },
+  {
+    "repository": "llvm/llvm-project",
+    "ref": "1ac93e094347b45208f215c98038606432c87d60",
+    "tags": ["c++", "monorepo", "large", "subprojects"]
+  }
+]

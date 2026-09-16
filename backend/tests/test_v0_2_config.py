@@ -56,6 +56,38 @@ def test_package_json_node_required_version_parsing():
     assert fact["value"] == ">=22"
 
 
+def test_package_json_unsupported_engines_shapes_are_ignored():
+    unsupported_values = [
+        '["node", ">=22"]',
+        '"node >=22"',
+        'null',
+        '42',
+        'true',
+        '{"node": [">=22"]}',
+        '{"node": {"version": ">=22"}}',
+    ]
+
+    for engines in unsupported_values:
+        facts, findings = extract_configuration({
+            "package.json": f'{{"engines": {engines}}}'
+        })
+        assert not any(fact["type"] == "node.required_version" for fact in facts)
+        assert findings == []
+
+
+def test_unsupported_package_shape_does_not_block_other_configuration_facts():
+    facts, findings = extract_configuration({
+        "package.json": '{"engines": ["node", ">=22"]}',
+        "pyproject.toml": '[project]\nrequires-python = ">=3.12"\n',
+    })
+
+    assert not any(fact["type"] == "node.required_version" for fact in facts)
+    assert any(
+        fact["type"] == "python.required_version" and fact["value"] == ">=3.12"
+        for fact in facts
+    )
+
+
 def test_github_actions_python_version_parsing():
     facts, findings = extract_configuration({
         ".github/workflows/test.yml": """

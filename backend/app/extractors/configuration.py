@@ -1,5 +1,6 @@
 import json
 import re
+from collections.abc import Mapping
 from typing import Any
 
 import yaml
@@ -253,7 +254,14 @@ def _parse_package_json(file_path: str, content: str):
     except Exception:
         return []
 
-    node_version = (parsed.get("engines") or {}).get("node")
+    if not isinstance(parsed, Mapping):
+        return []
+
+    engines = parsed.get("engines")
+    if not isinstance(engines, Mapping):
+        return []
+
+    node_version = engines.get("node")
     if not node_version:
         return []
 
