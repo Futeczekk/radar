@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 
-from app.models.repository import ImpactRequest, RepositoryRequest
+from app.models.repository import DiffRequest, ImpactRequest, RepositoryRequest
+from app.services.diff import SnapshotMismatchError, diff_snapshots
 from app.services.impact import build_component_impact, build_file_impact
 from app.services.scanner import scan_repository
 from app.sources.github import GitHubError
@@ -49,3 +50,24 @@ def impact(request: ImpactRequest):
             status_code=error.status_code,
             detail=str(error)
         )
+
+
+@router.post("/diff")
+def diff(request: DiffRequest):
+    try:
+        base = scan_repository(request.url, request.base_ref)
+        target = scan_repository(request.url, request.target_ref)
+        return diff_snapshots(base["snapshot"], target["snapshot"])
+
+    except SnapshotMismatchError as error:
+        raise HTTPException(status_code=409, detail=str(error))
+
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+
+    except GitHubError as error:
+        detail = {
+            "error": error.error_type,
+            "message": str(error),
+        }
+        raise HTTPException(status_code=error.status_code, detail=detail)

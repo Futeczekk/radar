@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-import httpx
+from urllib.parse import quote
+
+from app.sources.github import GitHubError, github_request
 
 
 IMPORTANT_PATH_HINTS = (
@@ -12,31 +14,22 @@ IMPORTANT_PATH_HINTS = (
 )
 
 
-class RepositorySourceError(Exception):
-    def __init__(self, message: str, status_code: int = 502):
-        super().__init__(message)
-        self.status_code = status_code
+def get_repository_tree_entries(repository: str, ref: str = "HEAD"):
+    url = f"https://api.github.com/repos/{repository}/git/trees/{ref}?recursive=1"
 
-
-def get_repository_tree(repository: str):
-    url = f"https://api.github.com/repos/{repository}/git/trees/HEAD?recursive=1"
-
-    try:
-        response = httpx.get(url, timeout=10.0)
-    except httpx.RequestError as exc:
-        raise RepositorySourceError("Could not connect to GitHub") from exc
-
-    if response.status_code != 200:
-        raise RepositorySourceError(
-            "Could not fetch repository tree",
-            response.status_code,
-        )
-
-    payload = response.json()
+    payload = github_request(url, not_found_message="GitHub repository tree/ref not found").json()
     if "tree" not in payload:
         return []
 
-    return [item["path"] for item in payload.get("tree", []) if item.get("type") == "blob"]
+    return [
+        {"path": item["path"], "sha": item.get("sha")}
+        for item in payload.get("tree", [])
+        if item.get("type") == "blob"
+    ]
+
+
+def get_repository_tree(repository: str, ref: str = "HEAD"):
+    return [item["path"] for item in get_repository_tree_entries(repository, ref)]
 
 
 def select_important_file_paths(paths):
@@ -59,11 +52,14 @@ def select_important_file_paths(paths):
 def get_repository_file_contents(repository: str, default_branch: str, paths):
     contents = {}
     for path in paths:
-        url = f"https://raw.githubusercontent.com/{repository}/{default_branch}/{path}"
+        encoded_path = quote(path, safe="/")
+        url = f"https://raw.githubusercontent.com/{repository}/{default_branch}/{encoded_path}"
         try:
-            response = httpx.get(url, timeout=10.0)
-        except httpx.RequestError:
-            continue
+            response = github_request(url, not_found_message="GitHub file not found")
+        except GitHubError as error:
+            if error.error_type == "not_found":
+                continue
+            raise
         if response.status_code == 200:
             contents[path] = response.text
     return contents

@@ -6,10 +6,10 @@ from app.core.database import (
 )
 from app.extractors.configuration import extract_configuration
 from app.extractors.technology import extract_technologies
-from app.sources.github import get_repository, get_latest_release
+from app.sources.github import get_commit, get_repository, get_latest_release
 from app.sources.repository import (
     get_repository_file_contents,
-    get_repository_tree,
+    get_repository_tree_entries,
     select_important_file_paths,
 )
 
@@ -787,7 +787,7 @@ def build_repository_graph(file_contents):
     }
 
 
-def scan_repository(url: str):
+def scan_repository(url: str, ref: str | None = None):
     if not url.startswith(GITHUB_PREFIX):
         raise ValueError(
             "Currently only GitHub repositories are supported"
@@ -796,9 +796,13 @@ def scan_repository(url: str):
     repository = url.removeprefix(GITHUB_PREFIX).rstrip("/")
 
     data = get_repository(repository)
-    files = get_repository_tree(repository)
+    requested_ref = ref or data.get("default_branch", "main")
+    commit_data = get_commit(repository, requested_ref)
+    resolved_ref = commit_data.get("sha")
+    tree_entries = get_repository_tree_entries(repository, resolved_ref)
+    files = [entry["path"] for entry in tree_entries]
     important_paths = select_important_file_paths(files)
-    important_contents = get_repository_file_contents(repository, data.get("default_branch", "main"), important_paths)
+    important_contents = get_repository_file_contents(repository, resolved_ref, important_paths)
     entities, tech_facts = extract_technologies(files)
     config_facts, findings = extract_configuration(important_contents)
     facts = tech_facts + config_facts
@@ -834,11 +838,21 @@ def scan_repository(url: str):
         path: content
         for path, content in get_repository_file_contents(
             repository,
-            data.get("default_branch", "main"),
+            resolved_ref,
             files[:200]
         ).items()
     })
     component_graph = build_component_graph(files, repository_map, repository_graph)
+
+    snapshot = {
+        "repository": data["full_name"],
+        "ref": requested_ref,
+        "commit_sha": resolved_ref,
+        "files": sorted(tree_entries, key=lambda item: item["path"]),
+        "facts": facts,
+        "repository_graph": repository_graph,
+        "component_graph": component_graph,
+    }
 
     return {
         "repository": data["full_name"],
@@ -846,6 +860,8 @@ def scan_repository(url: str):
         "stars": data["stargazers_count"],
         "open_issues": data["open_issues_count"],
         "default_branch": data["default_branch"],
+        "ref": requested_ref,
+        "commit_sha": resolved_ref,
         "files_scanned": len(files),
         "entities": entities,
         "facts": facts,
@@ -853,6 +869,7 @@ def scan_repository(url: str):
         "repository_map": repository_map,
         "repository_graph": repository_graph,
         "component_graph": component_graph,
+        "snapshot": snapshot,
         "latest_release": latest_release,
         "previous_release": previous_version,
         "new_release_detected": new_release,
