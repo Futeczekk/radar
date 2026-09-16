@@ -53,6 +53,52 @@ ENTRY_POINT_RULES = {
     "main.java": ("java_entry_point", 0.9),
 }
 
+COMPONENT_DIRECTORY_TYPES = {
+    ".github": "configuration",
+    "backend": "backend",
+    "server": "backend",
+    "frontend": "frontend",
+    "web": "frontend",
+    "ui": "frontend",
+    "api": "api",
+    "service": "service",
+    "services": "service",
+    "db": "data",
+    "database": "data",
+    "data": "data",
+    "cli": "cli",
+    "config": "configuration",
+    "configs": "configuration",
+    "infra": "infrastructure",
+    "infrastructure": "infrastructure",
+    "terraform": "infrastructure",
+    "k8s": "infrastructure",
+    "helm": "infrastructure",
+    "lib": "library",
+    "libs": "library",
+    "src": "library",
+    "tests": "test",
+    "test": "test",
+    "examples": "example",
+    "example": "example",
+    "demo": "example",
+    "samples": "example",
+    "contrib": "subproject",
+    "vendor": "vendor",
+    "third_party": "vendor",
+    "external": "vendor",
+    "deps": "vendor",
+    "build": "generated",
+    "dist": "generated",
+    "generated": "generated",
+    "out": "generated",
+    "target": "generated",
+}
+
+SECONDARY_COMPONENT_TYPES = {
+    "test", "example", "subproject", "vendor", "generated", "documentation",
+}
+
 
 def _normalize_repo_path(path: str):
     return path.replace("\\", "/").strip("/")
@@ -285,6 +331,203 @@ def build_repository_map(paths):
         "important_files": important_files,
         "entry_points": entry_points,
     }
+
+
+def _component_scope_for_type(component_type: str):
+    if component_type in SECONDARY_COMPONENT_TYPES:
+        return component_type
+    return "project"
+
+
+def _component_name(component_id: str, component_type: str):
+    if component_id == "root":
+        return "Root Project"
+    name = component_id.rsplit("/", 1)[-1].replace("_", " ").replace("-", " ")
+    if component_type == "subproject":
+        return name.title() if name else "Subproject"
+    return name.title() if name else component_type.title()
+
+
+def _component_directory_candidate(path: str):
+    segments = [segment for segment in _normalize_repo_path(path).split("/") if segment]
+    if not segments:
+        return "root", "unknown", "root"
+
+    for index, segment in enumerate(segments[:-1]):
+        lowered = segment.lower()
+        if lowered in {"tests", "test", "fixtures", "testdata"}:
+            return "/".join(segments[:index + 1]), "test", "secondary_directory"
+        if lowered in {"examples", "example", "demo", "samples"}:
+            return "/".join(segments[:index + 1]), "example", "secondary_directory"
+        if lowered == "contrib":
+            return "/".join(segments[:index + 1]), "subproject", "secondary_directory"
+        if lowered in {"vendor", "third_party", "external", "deps"}:
+            return "/".join(segments[:index + 1]), "vendor", "secondary_directory"
+        if lowered in {"build", "dist", "generated", "out", "target"}:
+            return "/".join(segments[:index + 1]), "generated", "secondary_directory"
+        if lowered in {"docs", "documentation"}:
+            return "/".join(segments[:index + 1]), "documentation", "secondary_directory"
+
+    if len(segments) > 2 and segments[0].lower() in {"apps", "packages"}:
+        candidate = segments[1].lower()
+        component_type = COMPONENT_DIRECTORY_TYPES.get(candidate)
+        if component_type is None:
+            component_type = "library" if segments[0].lower() == "packages" else "unknown"
+        return "/".join(segments[:2]), component_type, "monorepo_directory"
+
+    for index, segment in enumerate(segments[:-1]):
+        component_type = COMPONENT_DIRECTORY_TYPES.get(segment.lower())
+        if component_type is not None:
+            return "/".join(segments[:index + 1]), component_type, "directory_role"
+
+    if len(segments) == 1:
+        return "root", "unknown", "root"
+    return segments[0], "unknown", "unknown_directory"
+
+
+def _component_evidence(component_id: str, component_type: str, files: list[str], repository_map: dict):
+    evidence = []
+    directory_path = component_id if component_id != "root" else ""
+    if component_id == "root":
+        evidence.append({
+            "type": "root_files",
+            "value": "repository root",
+            "reason": "Files are not contained by a stronger deterministic component directory",
+        })
+    else:
+        evidence.append({
+            "type": "directory_role",
+            "file": directory_path + "/",
+            "reason": f"Directory classified as {component_type}",
+        })
+
+    for entry_point in repository_map.get("entry_points", []):
+        if entry_point["path"] in files:
+            evidence.append({
+                "type": "entry_point",
+                "file": entry_point["path"],
+                "reason": entry_point["evidence"][0]["reason"],
+            })
+    for important_file in repository_map.get("important_files", []):
+        if important_file["path"] in files:
+            evidence.append({
+                "type": "important_file",
+                "file": important_file["path"],
+                "reason": important_file["evidence"][0]["reason"],
+            })
+    return evidence[:5]
+
+
+def _merge_root_library_component(component_data, memberships, repository_map, repository_graph):
+    root_component = component_data.get("root")
+    if not root_component or root_component["scope"] != "project":
+        return
+
+    root_files = set(root_component["files"])
+    if not {"package.json", "pyproject.toml"}.intersection(root_files):
+        return
+
+    entry_points = {
+        entry_point["path"]
+        for entry_point in (repository_map or {}).get("entry_points", [])
+        if entry_point["path"] in root_files
+    }
+    if not entry_points:
+        return
+
+    primary_source_ids = [
+        component_id
+        for component_id, component in component_data.items()
+        if component_id in {"lib", "src"} and component["scope"] == "project"
+    ]
+    if len(primary_source_ids) != 1:
+        return
+    source_id = primary_source_ids[0]
+
+    delegates_to_source = any(
+        relationship.get("source") in entry_points
+        and memberships.get(relationship.get("target")) == source_id
+        and relationship.get("scope", "project") == "project"
+        for relationship in (repository_graph or {}).get("relationships", [])
+    )
+    if not delegates_to_source:
+        return
+
+    source_component = component_data.pop(source_id)
+    root_component["files"].extend(source_component["files"])
+    root_component["files"].sort()
+    root_component["confidence"] = max(root_component["confidence"], source_component["confidence"])
+    root_component["_signals"].add("root_source_delegation")
+    for path in source_component["files"]:
+        memberships[path] = "root"
+
+
+def build_component_graph(paths, repository_map, repository_graph):
+    normalized_paths = sorted({_normalize_repo_path(path) for path in paths or [] if path})
+    memberships = {}
+    component_data = {}
+    for path in normalized_paths:
+        component_id, component_type, signal = _component_directory_candidate(path)
+        memberships[path] = component_id
+        component = component_data.setdefault(component_id, {
+            "id": component_id,
+            "name": _component_name(component_id, component_type),
+            "type": component_type,
+            "scope": _component_scope_for_type(component_type),
+            "confidence": 0.95 if signal != "unknown_directory" and component_type != "unknown" else 0.45,
+            "files": [],
+            "_signals": set(),
+        })
+        component["files"].append(path)
+        component["_signals"].add(signal)
+
+    root_component = component_data.get("root")
+    if root_component:
+        root_files = set(root_component["files"])
+        has_library_manifest = "package.json" in root_files or "pyproject.toml" in root_files
+        has_library_entry = any(path.rsplit("/", 1)[-1].lower() in {"index.js", "index.ts", "main.py"} for path in root_files)
+        if has_library_manifest and has_library_entry:
+            root_component["type"] = "library"
+            root_component["name"] = "Root Library"
+            root_component["confidence"] = 0.8
+            root_component["scope"] = "project"
+
+    _merge_root_library_component(component_data, memberships, repository_map, repository_graph)
+
+    components = []
+    for component_id in sorted(component_data):
+        component = component_data[component_id]
+        component["evidence"] = _component_evidence(
+            component["id"], component["type"], component["files"], repository_map or {}
+        )
+        del component["_signals"]
+        components.append(component)
+
+    component_relationships = []
+    seen_relationships = {}
+    for relationship in (repository_graph or {}).get("relationships", []):
+        source_component = memberships.get(relationship.get("source"))
+        target_component = memberships.get(relationship.get("target"))
+        if not source_component or not target_component or source_component == target_component:
+            continue
+        key = (source_component, target_component, relationship.get("type"))
+        if key not in seen_relationships:
+            seen_relationships[key] = {
+                "source": source_component,
+                "target": target_component,
+                "type": "depends_on",
+                "confidence": relationship.get("confidence", 1.0),
+                "scope": component_data[source_component]["scope"],
+                "evidence": [],
+            }
+        seen_relationships[key]["evidence"].append({
+            "source_file": relationship.get("source"),
+            "target_file": relationship.get("target"),
+            "relationship": relationship.get("type"),
+        })
+
+    component_relationships.extend(seen_relationships.values())
+    return {"components": components, "relationships": component_relationships}
 
 
 def _path_scope(path: str):
@@ -595,6 +838,7 @@ def scan_repository(url: str):
             files[:200]
         ).items()
     })
+    component_graph = build_component_graph(files, repository_map, repository_graph)
 
     return {
         "repository": data["full_name"],
@@ -608,6 +852,7 @@ def scan_repository(url: str):
         "findings": findings,
         "repository_map": repository_map,
         "repository_graph": repository_graph,
+        "component_graph": component_graph,
         "latest_release": latest_release,
         "previous_release": previous_version,
         "new_release_detected": new_release,
