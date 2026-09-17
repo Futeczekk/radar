@@ -1,9 +1,9 @@
 from fastapi import APIRouter, HTTPException
 
 from app.models.repository import DiffRequest, ImpactRequest, RepositoryRequest
+from app.application.scanning import scan_repository
 from app.services.diff import SnapshotMismatchError, diff_snapshots
 from app.services.impact import build_component_impact, build_file_impact
-from app.services.scanner import scan_repository
 from app.sources.github import GitHubError
 
 
@@ -13,7 +13,7 @@ router = APIRouter()
 @router.post("/scan")
 def scan(request: RepositoryRequest):
     try:
-        return scan_repository(request.url)
+        return scan_repository(request.url, request.ref)
 
     except ValueError as error:
         raise HTTPException(

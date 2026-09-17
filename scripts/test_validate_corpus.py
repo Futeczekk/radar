@@ -165,6 +165,40 @@ def test_scan_mode_does_not_call_impact_or_diff(monkeypatch):
     assert calls == ["/scan"]
 
 
+def test_scan_payload_includes_the_exact_pinned_ref(monkeypatch):
+    captured = {}
+
+    def operation(base_url, path, payload, timeout):
+        captured.update(payload)
+        return scan_operation()
+
+    monkeypatch.setattr(validate_corpus, "_operation", operation)
+
+    validate_corpus.validate_entry(entry(), "http://radar", 1, "scan")
+
+    assert captured == {"url": "https://github.com/example/repo", "ref": "abc123"}
+
+
+def test_full_sha_pinned_ref_mismatch_fails_clearly(monkeypatch):
+    pinned = "f1021eb25d0f4cfbd0d3f8fc37caeaeab0f31b95"
+    mismatched_scan = scan_operation()
+    mismatched_scan["body"]["commit_sha"] = "d893460cc40474cd605a75ae08c7ca83e722b5e6"
+    monkeypatch.setattr(validate_corpus, "_operation", lambda *args: mismatched_scan)
+
+    result = validate_corpus.validate_entry(
+        {"repository": "example/repo", "ref": pinned, "tags": []},
+        "http://radar",
+        1,
+        "scan",
+    )
+
+    assert result["status"] == "FAIL"
+    assert result["failure_reason"] == (
+        f"pinned ref mismatch: requested {pinned}, "
+        "returned d893460cc40474cd605a75ae08c7ca83e722b5e6"
+    )
+
+
 def test_deep_mode_calls_scan_impact_and_diff(monkeypatch):
     calls = []
     results = iter([scan_operation(), operation(), operation()])

@@ -1,5 +1,24 @@
 # RADAR
 
+## Start Here
+
+Radar is a deterministic, evidence-backed repository analysis service. The
+current architecture and developer workflow are documented in
+[docs/architecture.md](docs/architecture.md) and
+[docs/development.md](docs/development.md).
+
+```bash
+make setup
+make verify-env
+make check
+make run
+```
+
+Run `make smoke` in a second terminal after the API starts. Testing profiles,
+validation reports, and the CI contract are described in
+[docs/testing.md](docs/testing.md), [docs/validation-corpus.md](docs/validation-corpus.md),
+and [docs/ci.md](docs/ci.md).
+
 ## Project Purpose
 
 Radar is a software intelligence platform.

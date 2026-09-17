@@ -1,0 +1,14 @@
+{
+  "contract": "radar-ci-v0.9",
+  "fast": ["verify-env", "test", "smoke"],
+  "nightly": ["test", "validation-harness", "scan", "deep", "heavy"],
+  "commands": {
+    "verify-env": "make verify-env",
+    "test": "make test",
+    "smoke": "make smoke",
+    "validation-harness": "make harness-test",
+    "scan": "make corpus-scan",
+    "deep": "make corpus-deep",
+    "heavy": "make corpus-heavy"
+  }
+}

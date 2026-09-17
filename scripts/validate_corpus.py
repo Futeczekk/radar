@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -14,6 +15,7 @@ from urllib.request import Request, urlopen
 
 DEFAULT_CORPUS = Path(__file__).with_name("radar_validation_corpus.json")
 MODES = {"scan", "deep", "smoke"}
+FULL_COMMIT_SHA = re.compile(r"^[0-9a-fA-F]{40}$")
 
 
 def _request(base_url: str, path: str, payload: dict, timeout: float, method="POST"):
@@ -113,7 +115,7 @@ def _scan_result(entry, scan):
 
 def validate_entry(entry, base_url: str, timeout: float, mode="deep"):
     url = f"https://github.com/{entry['repository']}"
-    scan = _operation(base_url, "/scan", {"url": url}, timeout)
+    scan = _operation(base_url, "/scan", {"url": url, "ref": entry["ref"]}, timeout)
     if not isinstance(scan, dict):
         scan = _operation_summary(None, reason="scan result missing")
     result = _scan_result(entry, scan)
@@ -122,6 +124,15 @@ def validate_entry(entry, base_url: str, timeout: float, mode="deep"):
         result["operations"]["impact"] = _operation_summary(None, reason="scan failed")
         result["operations"]["diff"] = _operation_summary(None, reason="scan failed")
         result["status"] = "FAIL"
+        result.pop("_impact_target", None)
+        return result
+
+    if FULL_COMMIT_SHA.fullmatch(entry["ref"]) and result["resolved_commit_sha"] != entry["ref"]:
+        result["status"] = "FAIL"
+        result["failure_reason"] = (
+            f"pinned ref mismatch: requested {entry['ref']}, "
+            f"returned {result['resolved_commit_sha']}"
+        )
         result.pop("_impact_target", None)
         return result
 
@@ -199,7 +210,7 @@ def _print_result(result):
     scan = operations.get("scan") or _operation_summary(None, reason="scan result missing")
     impact = operations.get("impact") or _operation_summary(None, reason="impact result missing")
     diff = operations.get("diff") or _operation_summary(None, reason="diff result missing")
-    print(
+    line = (
         f"{result['status']:<11} {result['repository']:<28} "
         f"scan={'ok' if scan.get('ok') else scan.get('error_type', 'unsupported')} "
         f"impact={'ok' if impact.get('ok') else impact.get('error_type', 'unsupported')} "
@@ -210,6 +221,9 @@ def _print_result(result):
         f"components={result['component_count'] if result['component_count'] is not None else '-':>3} "
         f"unknown={result['unknown_component_count'] if result['unknown_component_count'] is not None else '-':>3}"
     )
+    if result.get("failure_reason"):
+        line += f" reason={result['failure_reason']}"
+    print(line)
 
 
 def main():

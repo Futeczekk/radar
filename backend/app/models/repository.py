@@ -3,6 +3,7 @@ from pydantic import BaseModel
 
 class RepositoryRequest(BaseModel):
     url: str
+    ref: str | None = None
 
 
 class ImpactRequest(BaseModel):
