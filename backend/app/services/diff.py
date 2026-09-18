@@ -1,6 +1,7 @@
 import hashlib
 import json
 
+from app.core.technical_changes import evaluate_technical_changes
 from app.services.impact import build_file_impact
 
 
@@ -183,7 +184,7 @@ def diff_snapshots(base, target):
     component_relationships = _diff_relationships(
         base_data.get("component_graph"), target_data.get("component_graph")
     )
-    return {
+    result = {
         "repository": target_repository or base_repository,
         "base": {"ref": base_data.get("ref"), "commit_sha": base_data.get("commit_sha")},
         "target": {"ref": target_data.get("ref"), "commit_sha": target_data.get("commit_sha")},
@@ -196,3 +197,5 @@ def diff_snapshots(base, target):
             "impact": _impact_changes(files, base_data, target_data),
         },
     }
+    result["technical_changes"] = evaluate_technical_changes(base_data, target_data, result["changes"])
+    return result

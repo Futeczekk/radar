@@ -17,3 +17,10 @@ scope filtering, CI matrices, evidence/context preservation, deterministic
 ordering, deduplication, cache equivalence, and `/scan` compatibility. Live
 v0.10 review inspects every reported conflict manually; a non-zero count alone
 is not acceptance.
+
+v0.11 technical-change tests cover runtime and build fact transitions,
+configuration-conflict lifecycle, dependency and component graph changes,
+known impact, weak-scope and README noise suppression, evidence preservation,
+deterministic ordering, cache-equivalent snapshots, and `/diff` compatibility.
+Controlled review must inspect each emitted change's category, subject,
+before/after values, evidence, scopes, confidence, and known affected elements.

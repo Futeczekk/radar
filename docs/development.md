@@ -29,3 +29,8 @@ Configuration conflicts are evaluated from extracted facts in
 `backend/app/core/configuration_conflicts.py`. Keep version grammar explicit
 and conservative, preserve observation evidence/context, and keep source and
 HTTP concerns outside the evaluator.
+
+Technical changes are evaluated in `backend/app/core/technical_changes.py`
+from the existing diff and graph results. Add categories only when a modeled
+fact, relationship, component, or deterministic conflict state changes; raw
+file edits remain part of the existing diff and are not automatically promoted.
