@@ -311,6 +311,14 @@ def _parse_github_actions(file_path: str, content: str):
     seen = set()
     matrix_versions = {}
 
+    def matrix_values(value):
+        if not isinstance(value, str):
+            return None
+        match = re.fullmatch(r"\$\{\{\s*matrix\.([A-Za-z0-9_-]+)\s*\}\}", value)
+        if match is None:
+            return None
+        return matrix_versions.get(match.group(1))
+
     if isinstance(parsed, dict):
         strategy = parsed.get("jobs", {})
         if isinstance(strategy, dict):
@@ -336,8 +344,9 @@ def _parse_github_actions(file_path: str, content: str):
             version = _version_value(python_version)
             if not version:
                 continue
-            if python_version == "${{ matrix.python-version }}" and "python-version" in matrix_versions:
-                fact_value = matrix_versions["python-version"]
+            matrix_value = matrix_values(python_version)
+            if matrix_value is not None:
+                fact_value = matrix_value
                 source_type = "test_matrix"
                 environment = "test"
             else:
@@ -370,8 +379,9 @@ def _parse_github_actions(file_path: str, content: str):
             version = _version_value(node_version)
             if not version:
                 continue
-            if node_version == "${{ matrix.node-version }}" and "node-version" in matrix_versions:
-                fact_value = matrix_versions["node-version"]
+            matrix_value = matrix_values(node_version)
+            if matrix_value is not None:
+                fact_value = matrix_value
                 source_type = "test_matrix"
                 environment = "test"
             else:

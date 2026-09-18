@@ -5,6 +5,7 @@ from app.core.analysis import (
     build_repository_graph,
     build_repository_map,
 )
+from app.core.configuration_conflicts import detect_configuration_conflicts
 from app.core.database import get_previous_release, save_repository_state
 from app.extractors.configuration import extract_configuration
 from app.extractors.technology import extract_technologies
@@ -30,6 +31,7 @@ class ScanApplication:
         }
         entities, technology_facts = extract_technologies(files)
         configuration_facts, findings = extract_configuration(important_contents)
+        configuration_conflicts = detect_configuration_conflicts(configuration_facts)
         facts = technology_facts + configuration_facts
 
         release_data = self.source.latest_release(metadata["repository"])
@@ -75,6 +77,7 @@ class ScanApplication:
             "entities": entities,
             "facts": facts,
             "findings": findings,
+            "configuration_conflicts": configuration_conflicts,
             "repository_map": repository_map,
             "repository_graph": repository_graph,
             "component_graph": component_graph,

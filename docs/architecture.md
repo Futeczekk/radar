@@ -18,6 +18,9 @@ Source adapter -> RepositorySnapshot -> Application -> Radar Core
 - `app/application` coordinates loading, extraction, graph construction, and
   release persistence for API use cases.
 - `app/core` contains source-neutral analysis access and persistence primitives.
+- `app/core/configuration_conflicts.py` evaluates supported configuration facts
+  without source or transport knowledge and returns deterministic,
+  evidence-backed conflict observations.
 - `app/extractors` performs deterministic, defensive parsing and returns facts
   with evidence, confidence, and context.
 - `app/services/impact.py` computes dependency reachability. It does not infer
@@ -39,4 +42,6 @@ deferred until a behavior-preserving extraction can be covered separately.
 Evidence is retained on facts and relationships. Unknown or unsupported input
 is not guessed. Core analysis performs no network access and has no FastAPI
 request dependency. New source adapters should implement the snapshot contract,
-not add provider logic to the core.
+not add provider logic to the core. Scan responses expose the additive
+`configuration_conflicts` field; the legacy `findings` field and extractor
+tuple remain unchanged for v0.1-v0.9 callers.

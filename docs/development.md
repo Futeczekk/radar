@@ -24,3 +24,8 @@ is never printed or stored.
 Run `make run` in one terminal and a validation command in another. Add a new
 extractor under `backend/app/extractors`; add a source integration under
 `backend/app/sources` that returns `RepositorySnapshot`.
+
+Configuration conflicts are evaluated from extracted facts in
+`backend/app/core/configuration_conflicts.py`. Keep version grammar explicit
+and conservative, preserve observation evidence/context, and keep source and
+HTTP concerns outside the evaluator.
