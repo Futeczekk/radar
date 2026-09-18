@@ -34,3 +34,8 @@ Technical changes are evaluated in `backend/app/core/technical_changes.py`
 from the existing diff and graph results. Add categories only when a modeled
 fact, relationship, component, or deterministic conflict state changes; raw
 file edits remain part of the existing diff and are not automatically promoted.
+
+`POST /map` accepts an explicit repository collection. Cross-repository edges
+require exact machine-readable Git repository URLs found in supported package
+dependency fields. The map never fetches discovered URLs, uses name matching,
+or expands the requested collection.

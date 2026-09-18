@@ -23,6 +23,11 @@ Source adapter -> RepositorySnapshot -> Application -> Radar Core
   evidence-backed conflict observations.
 - `app/core/technical_changes.py` classifies deterministic changes from the
   existing snapshot diff, facts, conflict state, graphs, and impact results.
+- `app/core/repository_identity.py` performs exact repository identity
+  normalization; it never infers identity from names or similarity.
+- `app/services/repository_map.py` orchestrates explicit multi-repository map
+  requests, immutable scan results, relationship resolution, partial status,
+  and deterministic dependency/dependent projections.
 - `app/extractors` performs deterministic, defensive parsing and returns facts
   with evidence, confidence, and context.
 - `app/services/impact.py` computes dependency reachability. It does not infer
@@ -48,4 +53,4 @@ not add provider logic to the core. Scan responses expose the additive
 `configuration_conflicts` field; the legacy `findings` field and extractor
 tuple remain unchanged for v0.1-v0.9 callers. Diff responses expose additive
 `technical_changes` at the top level while preserving the existing `changes`
-object.
+object. `/map` is additive and does not alter `/scan`, `/impact`, or `/diff`.

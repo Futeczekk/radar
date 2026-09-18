@@ -257,33 +257,44 @@ def _parse_package_json(file_path: str, content: str):
     if not isinstance(parsed, Mapping):
         return []
 
-    engines = parsed.get("engines")
-    if not isinstance(engines, Mapping):
-        return []
-
-    node_version = engines.get("node")
-    if not node_version:
-        return []
-
-    text = _version_value(node_version)
-    if not text:
-        return []
-
     scope = _scope_for_file(file_path)
     source_type = _source_type_for_file(file_path)
-    return [
-        _make_fact(
-            "node.required_version",
-            "Node.js",
-            text,
-            1.0,
-            "package_json",
-            [_make_evidence(file_path, None, None, "Node.js requirement declared in package.json")],
-            scope=scope,
-            source_type=source_type,
-            environment="runtime",
-        )
-    ]
+    facts = []
+    engines = parsed.get("engines")
+    if isinstance(engines, Mapping):
+        node_version = engines.get("node")
+        text = _version_value(node_version)
+        if text:
+            facts.append(_make_fact(
+                "node.required_version",
+                "Node.js",
+                text,
+                1.0,
+                "package_json",
+                [_make_evidence(file_path, None, None, "Node.js requirement declared in package.json")],
+                scope=scope,
+                source_type=source_type,
+                environment="runtime",
+            ))
+    for dependency_group in ("dependencies", "devDependencies", "optionalDependencies"):
+        dependencies = parsed.get(dependency_group)
+        if not isinstance(dependencies, Mapping):
+            continue
+        for package_name, raw_value in dependencies.items():
+            if not isinstance(raw_value, str) or not raw_value.startswith(("git+https://", "https://", "http://", "git@", "ssh://")):
+                continue
+            facts.append(_make_fact(
+                "repository.reference",
+                "Repository",
+                {"repository": raw_value, "raw": raw_value, "dependency": package_name},
+                1.0,
+                "package_json",
+                [_make_evidence(file_path, None, None, "Explicit repository URL in package dependency")],
+                scope=scope,
+                source_type=source_type,
+                environment="build",
+            ))
+    return facts
 
 
 def _iter_workflow_steps(node):

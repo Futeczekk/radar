@@ -1,13 +1,24 @@
 from fastapi import APIRouter, HTTPException
 
+from app.models.map import MapRequest
 from app.models.repository import DiffRequest, ImpactRequest, RepositoryRequest
 from app.application.scanning import scan_repository
 from app.services.diff import SnapshotMismatchError, diff_snapshots
 from app.services.impact import build_component_impact, build_file_impact
 from app.sources.github import GitHubError
+from app.services.repository_map import MultiRepositoryMapService
 
 
 router = APIRouter()
+_map_service = MultiRepositoryMapService()
+
+
+@router.post("/map")
+def repository_map(request: MapRequest):
+    try:
+        return _map_service.build([item.model_dump() if hasattr(item, "model_dump") else item.dict() for item in request.repositories])
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
 
 
 @router.post("/scan")

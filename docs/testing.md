@@ -24,3 +24,8 @@ known impact, weak-scope and README noise suppression, evidence preservation,
 deterministic ordering, cache-equivalent snapshots, and `/diff` compatibility.
 Controlled review must inspect each emitted change's category, subject,
 before/after values, evidence, scopes, confidence, and known affected elements.
+
+v0.12 map tests cover exact identity normalization, immutable snapshot entries,
+explicit URL relationships, unresolved outside-collection references, partial
+failures, duplicate requests, request-order permutations, evidence aggregation,
+and reuse of identical repository/ref analyses.
