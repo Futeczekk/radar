@@ -9,6 +9,11 @@ class MapRequest(BaseModel):
     repositories: list[RepositoryRequest]
 
 
+class MapImpactRequest(BaseModel):
+    repositories: list[RepositoryRequest]
+    target: str
+
+
 class RepositoryMapEntry(BaseModel):
     repository_id: str
     requested_url: str

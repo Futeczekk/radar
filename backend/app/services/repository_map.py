@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from copy import deepcopy
 import re
 from typing import Any, Callable
@@ -67,8 +68,118 @@ class MultiRepositoryMapService:
             })
         return references
 
-    def build(self, requests: list[dict[str, Any]]) -> dict[str, Any]:
+    @staticmethod
+    def _request_payloads(requests: list[Any]) -> list[dict[str, Any]]:
+        payloads: list[dict[str, Any]] = []
+        for request in requests:
+            if hasattr(request, "model_dump"):
+                payloads.append(request.model_dump())
+            elif hasattr(request, "dict"):
+                payloads.append(request.dict())
+            elif isinstance(request, dict):
+                payloads.append(request)
+            else:
+                payloads.append({"url": request})
+        return payloads
+
+    def build_impact(self, requests: list[Any], target: str) -> dict[str, Any]:
         if not requests:
+            raise ValueError("repositories must not be empty")
+        if not isinstance(target, str) or not target.strip():
+            raise ValueError("target repository must not be empty")
+
+        map_result = self.build(self._request_payloads(requests))
+        relationships = map_result.get("relationships", [])
+        successful = {
+            item.get("repository_id"): item
+            for item in map_result.get("repositories", [])
+            if item.get("status") == "SUCCESS"
+        }
+        normalized_target = normalize_repository_identity(target) or target.rstrip("/")
+
+        if normalized_target not in successful:
+            return {
+                "target": normalized_target,
+                "found": False,
+                "status": map_result.get("status", "COMPLETE"),
+                "direct_dependents": [],
+                "transitive_dependents": [],
+            }
+
+        reverse: dict[str, list[dict[str, Any]]] = {}
+        for relationship in relationships:
+            target_repository = relationship.get("target_repository")
+            if not target_repository:
+                continue
+            reverse.setdefault(target_repository, []).append(relationship)
+        for relationships_for_target in reverse.values():
+            relationships_for_target.sort(key=lambda item: (item.get("source_repository", ""), item.get("target_repository", ""), item.get("type", "")))
+
+        queue: deque[tuple[str, list[str], list[dict[str, Any]]]] = deque([(normalized_target, [normalized_target], [])])
+        best: dict[str, dict[str, Any]] = {}
+
+        while queue:
+            current, path, evidence_chain = queue.popleft()
+            for relationship in reverse.get(current, []):
+                dependent = relationship.get("source_repository")
+                if not dependent or dependent == normalized_target or dependent in path:
+                    continue
+                next_path = [dependent] + path
+                next_evidence = [relationship] + evidence_chain
+                distance = len(next_path) - 1
+                current_best = best.get(dependent)
+                if current_best is None or distance < current_best["distance"] or (distance == current_best["distance"] and tuple(next_path) < tuple(current_best["path"])):
+                    best[dependent] = {
+                        "repository": dependent,
+                        "distance": distance,
+                        "path": next_path,
+                        "evidence": next_evidence,
+                    }
+                    queue.append((dependent, next_path, next_evidence))
+
+        direct_dependents: list[dict[str, Any]] = []
+        transitive_dependents: list[dict[str, Any]] = []
+        for repository in sorted(best):
+            item = best[repository]
+            impact_item = {
+                "repository": repository,
+                "distance": item["distance"],
+                "path": item["path"],
+                "evidence": [
+                    {
+                        "source_repository": evidence.get("source_repository"),
+                        "target_repository": evidence.get("target_repository"),
+                        "evidence": [
+                            {
+                                key: value
+                                for key, value in record.items()
+                                if key not in {"source_repository", "snapshot_id", "kind", "value"}
+                            }
+                            for record in evidence.get("evidence", [])
+                        ],
+                    }
+                    for evidence in item["evidence"]
+                ],
+            }
+            if item["distance"] == 1:
+                direct_dependents.append(impact_item)
+            else:
+                transitive_dependents.append(impact_item)
+
+        direct_dependents.sort(key=lambda item: item["repository"])
+        transitive_dependents.sort(key=lambda item: item["repository"])
+
+        return {
+            "target": normalized_target,
+            "found": True,
+            "status": map_result.get("status", "COMPLETE"),
+            "direct_dependents": direct_dependents,
+            "transitive_dependents": transitive_dependents,
+        }
+
+    def build(self, requests: list[dict[str, Any]]) -> dict[str, Any]:
+        normalized_requests = self._request_payloads(requests)
+        if not normalized_requests:
             raise ValueError("repositories must not be empty")
 
         entries: list[RepositoryMapEntry] = []
@@ -77,7 +188,7 @@ class MultiRepositoryMapService:
         seen_request_keys: set[tuple[str, str | None]] = set()
         duplicate_conflicts: list[RepositoryMapEntry] = []
 
-        for request in requests:
+        for request in normalized_requests:
             url = request.get("url")
             ref = request.get("ref")
             identity = normalize_repository_identity(url) if isinstance(url, str) else None

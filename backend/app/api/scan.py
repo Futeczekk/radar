@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 
-from app.models.map import MapRequest
+from app.models.map import MapImpactRequest, MapRequest
 from app.models.repository import DiffRequest, ImpactRequest, RepositoryRequest
 from app.application.scanning import scan_repository
 from app.services.diff import SnapshotMismatchError, diff_snapshots
@@ -17,6 +17,17 @@ _map_service = MultiRepositoryMapService()
 def repository_map(request: MapRequest):
     try:
         return _map_service.build([item.model_dump() if hasattr(item, "model_dump") else item.dict() for item in request.repositories])
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+
+
+@router.post("/map/impact")
+def repository_map_impact(request: MapImpactRequest):
+    try:
+        return _map_service.build_impact([
+            item.model_dump() if hasattr(item, "model_dump") else item.dict()
+            for item in request.repositories
+        ], request.target)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error))
 
